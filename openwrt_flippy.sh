@@ -1,48 +1,90 @@
 #!/usr/bin/env bash
-#=====================================================================================
+#==============================================================================================
+#
 # Description: Automatically Packaged OpenWrt
 # Function: Use Flippy's kernrl files and script to Packaged openwrt
 # Copyright (C) 2021 https://github.com/unifreq/openwrt_packit
 # Copyright (C) 2021 https://github.com/ophub/flippy-openwrt-actions
-#=====================================================================================
-
-if [[ -z "${OPENWRT_ARMVIRT}" ]]; then
-    echo "The [ OPENWRT_ARMVIRT ] variable must be specified."
-    echo "You can use ${GITHUB_WORKSPACE} relative path: [ openwrt/bin/targets/*/*/*rootfs.tar.gz ]"
-    echo "Absolute path can be used: [ https://github.com/.../releases/download/.../*rootfs.tar.gz ]"
-    echo "You can run this Actions again after setting."
-    exit 1
-fi
-
-# Install the compressed package
-sudo apt-get -qq update && sudo apt-get -qq install -y p7zip p7zip-full zip unzip gzip xz-utils pigz zstd subversion git
-
-# Set the default value
-MAKE_PATH="${PWD}"
-# The file specified in the ${OPENWRT_ARMVIRT} parameter will be saved as ${PACKAGE_FILE}
-PACKAGE_FILE="openwrt-armvirt-64-default-rootfs.tar.gz"
-PACKAGE_OPENWRT=("vplus" "beikeyun" "l1pro" "r68s" "s905" "s905d" "s905x2" "s905x3" "s912" "s922x" "s922x-n2" "qemu" "diy")
-SELECT_ARMBIANKERNEL=("5.10.125" "5.15.50")
+#
+#======================================= Functions list =======================================
+#
+# error_msg         : Output error message
+# init_var          : Initialize all variables
+# init_packit_repo  : Initialize packit openwrt repo
+# query_kernel      : Query the latest kernel version
+# check_kernel      : Check kernel files integrity
+# download_kernel   : Download the kernel
+# make_openwrt      : Loop to make OpenWrt files
+# out_github_env    : Output github.com variables
+#
+#=============================== Set make environment variables ===============================
+#
+# Set the default package source download repository
 SCRIPT_REPO_URL_VALUE="https://github.com/unifreq/openwrt_packit"
 SCRIPT_REPO_BRANCH_VALUE="master"
-KERNEL_REPO_URL_VALUE="https://github.com/breakings/OpenWrt/tree/main/opt/kernel"
-# KERNEL_REPO_URL_VALUE URL supported format:
-# KERNEL_REPO_URL_VALUE="https://github.com/breakings/OpenWrt/trunk/opt/kernel"
-# KERNEL_REPO_URL_VALUE="https://github.com/breakings/OpenWrt/tree/main/opt/kernel"
-KERNEL_VERSION_NAME_VALUE="5.10.125_5.15.50"
-KERNEL_AUTO_LATEST_VALUE="true"
+
+# Set the *rootfs.tar.gz package save name
+PACKAGE_FILE="openwrt-armvirt-64-generic-rootfs.tar.gz"
+
+# Set the list of supported device
+PACKAGE_OPENWRT=(
+    "rock5b" "rock5c" "e52c" "ak88" "h88k" "h88k-v3"
+    "r66s" "r68s" "e25" "photonicat" "cm3"
+    "watermelon-pi" "zcube1-max" "jp-tvbox" "ht2" "e20c" "h28k" "h66k" "h68k" "h69k" "h69k-max"
+    "beikeyun" "l1pro"
+    "vplus"
+    "s922x" "s922x-n2" "s905x3" "s905x2" "s912" "s905d" "s905"
+    "qemu"
+    "diy"
+)
+# Set the list of devices using the [ rk3588 ] kernel
+PACKAGE_OPENWRT_RK3588=("rock5b" "rock5c" "e52c" "ak88" "h88k" "h88k-v3")
+# Set the list of devices using the [ rk35xx ] kernel
+# Devices from the rk3528/rk3566/rk3568 series can utilize the rk35xx and rk3588 kernels.
+PACKAGE_OPENWRT_RK35XX=("watermelon-pi" "zcube1-max" "jp-tvbox" "ht2" "e20c" "h28k" "h66k" "h68k" "h69k" "h69k-max")
+# Set the list of devices using the [ 6.x.y ] kernel
+PACKAGE_OPENWRT_6XY=("r66s" "r68s" "e25" "photonicat" "cm3" "rk3399")
+# All are packaged by default, and independent settings are supported, such as: [ s905x3_s905d_rock5b ]
 PACKAGE_SOC_VALUE="all"
-GZIP_IMGS_VALUE="auto"
+
+# Set the default packaged kernel download repository
+KERNEL_REPO_URL_VALUE="breakings/OpenWrt"
+# Set kernel tag: kernel_stable, kernel_rk3588, kernel_rk35xx
+KERNEL_TAGS=("stable" "rk3588" "rk35xx")
+STABLE_KERNEL=("6.1.y" "6.6.y")
+RK3588_KERNEL=("5.10.y")
+RK35XX_KERNEL=("5.10.y")
+KERNEL_AUTO_LATEST_VALUE="true"
+
 # Set the working directory under /opt
 SELECT_PACKITPATH_VALUE="openwrt_packit"
 SELECT_OUTPUTPATH_VALUE="output"
+GZIP_IMGS_VALUE="auto"
 SAVE_OPENWRT_ARMVIRT_VALUE="true"
 
 # Set the default packaging script
 SCRIPT_VPLUS_FILE="mk_h6_vplus.sh"
 SCRIPT_BEIKEYUN_FILE="mk_rk3328_beikeyun.sh"
 SCRIPT_L1PRO_FILE="mk_rk3328_l1pro.sh"
+SCRIPT_ZCUBE1MAX_FILE="mk_rk3399_zcube1-max.sh"
+SCRIPT_CM3_FILE="mk_rk3566_radxa-cm3-rpi-cm4-io.sh"
+SCRIPT_HT2_FILE="mk_rk3528_ht2.sh"
+SCRIPT_E20C_FILE="mk_rk3528_e20c.sh"
+SCRIPT_H28K_FILE="mk_rk3528_h28k.sh"
+SCRIPT_H66K_FILE="mk_rk3568_h66k.sh"
+SCRIPT_H68K_FILE="mk_rk3568_h68k.sh"
+SCRIPT_H69K_FILE="mk_rk3568_h69k.sh"
+SCRIPT_H88K_FILE="mk_rk3588_h88k.sh"
+SCRIPT_H88KV3_FILE="mk_rk3588_h88k-v3.sh"
+SCRIPT_JPTVBOX_FILE="mk_rk3566_jp-tvbox.sh"
+SCRIPT_R66S_FILE="mk_rk3568_r66s.sh"
 SCRIPT_R68S_FILE="mk_rk3568_r68s.sh"
+SCRIPT_E25_FILE="mk_rk3568_e25.sh"
+SCRIPT_PHOTONICAT_FILE="mk_rk3568_photonicat.sh"
+SCRIPT_WATERMELONPI_FILE="mk_rk3568_watermelon-pi.sh"
+SCRIPT_ROCK5B_FILE="mk_rk3588_rock5b.sh"
+SCRIPT_ROCK5C_FILE="mk_rk3588s_rock5c.sh"
+SCRIPT_E52C_FILE="mk_rk3588s_e52c.sh"
 SCRIPT_S905_FILE="mk_s905_mxqpro+.sh"
 SCRIPT_S905D_FILE="mk_s905d_n1.sh"
 SCRIPT_S905X2_FILE="mk_s905x2_x96max.sh"
@@ -52,6 +94,7 @@ SCRIPT_S922X_FILE="mk_s922x_gtking.sh"
 SCRIPT_S922X_N2_FILE="mk_s922x_odroid-n2.sh"
 SCRIPT_QEMU_FILE="mk_qemu-aarch64_img.sh"
 SCRIPT_DIY_FILE="mk_diy.sh"
+SCRIPT_RK3399_FILE="mk_rk3399_generic.sh"
 
 # Set make.env related parameters
 WHOAMI_VALUE="flippy"
@@ -65,195 +108,416 @@ DISTRIB_REVISION_VALUE="R$(date +%Y.%m.%d)"
 DISTRIB_DESCRIPTION_VALUE="OpenWrt"
 
 # Set font color
-blue_font_prefix="\033[94m"
-purple_font_prefix="\033[95m"
-green_font_prefix="\033[92m"
-yellow_font_prefix="\033[93m"
-red_font_prefix="\033[91m"
-font_color_suffix="\033[0m"
-INFO="[${blue_font_prefix}INFO${font_color_suffix}]"
-STEPS="[${purple_font_prefix}STEPS${font_color_suffix}]"
-SUCCESS="[${green_font_prefix}SUCCESS${font_color_suffix}]"
-WARNING="[${yellow_font_prefix}WARNING${font_color_suffix}]"
-ERROR="[${red_font_prefix}ERROR${font_color_suffix}]"
+STEPS="[\033[95m STEPS \033[0m]"
+INFO="[\033[94m INFO \033[0m]"
+SUCCESS="[\033[92m SUCCESS \033[0m]"
+NOTE="[\033[93m NOTE \033[0m]"
+WARNING="[\033[93m WARNING \033[0m]"
+ERROR="[\033[91m ERROR \033[0m]"
+#
+#==============================================================================================
 
-# Specify the default value
-[[ -n "${SCRIPT_REPO_URL}" ]] || SCRIPT_REPO_URL="${SCRIPT_REPO_URL_VALUE}"
-[[ "${SCRIPT_REPO_URL}" == http* ]] || SCRIPT_REPO_URL="https://github.com/${SCRIPT_REPO_URL}"
-[[ -n "${SCRIPT_REPO_BRANCH}" ]] || SCRIPT_REPO_BRANCH="${SCRIPT_REPO_BRANCH_VALUE}"
-[[ -n "${KERNEL_REPO_URL}" ]] || KERNEL_REPO_URL="${KERNEL_REPO_URL_VALUE}"
-[[ "${KERNEL_REPO_URL}" == http* ]] || KERNEL_REPO_URL="https://github.com/${KERNEL_REPO_URL}"
-[[ -n "${PACKAGE_SOC}" ]] || PACKAGE_SOC="${PACKAGE_SOC_VALUE}"
-[[ -n "${KERNEL_VERSION_NAME}" ]] || KERNEL_VERSION_NAME="${KERNEL_VERSION_NAME_VALUE}"
-[[ -n "${KERNEL_AUTO_LATEST}" ]] || KERNEL_AUTO_LATEST="${KERNEL_AUTO_LATEST_VALUE}"
-[[ -n "${GZIP_IMGS}" ]] || GZIP_IMGS="${GZIP_IMGS_VALUE}"
-[[ -n "${SELECT_PACKITPATH}" ]] || SELECT_PACKITPATH="${SELECT_PACKITPATH_VALUE}"
-[[ -n "${SELECT_OUTPUTPATH}" ]] || SELECT_OUTPUTPATH="${SELECT_OUTPUTPATH_VALUE}"
-[[ -n "${SAVE_OPENWRT_ARMVIRT}" ]] || SAVE_OPENWRT_ARMVIRT="${SAVE_OPENWRT_ARMVIRT_VALUE}"
-
-# Specify the default packaging script
-[[ -n "${SCRIPT_VPLUS}" ]] || SCRIPT_VPLUS="${SCRIPT_VPLUS_FILE}"
-[[ -n "${SCRIPT_BEIKEYUN}" ]] || SCRIPT_BEIKEYUN="${SCRIPT_BEIKEYUN_FILE}"
-[[ -n "${SCRIPT_L1PRO}" ]] || SCRIPT_L1PRO="${SCRIPT_L1PRO_FILE}"
-[[ -n "${SCRIPT_R68S}" ]] || SCRIPT_R68S="${SCRIPT_R68S_FILE}"
-[[ -n "${SCRIPT_S905}" ]] || SCRIPT_S905="${SCRIPT_S905_FILE}"
-[[ -n "${SCRIPT_S905D}" ]] || SCRIPT_S905D="${SCRIPT_S905D_FILE}"
-[[ -n "${SCRIPT_S905X2}" ]] || SCRIPT_S905X2="${SCRIPT_S905X2_FILE}"
-[[ -n "${SCRIPT_S905X3}" ]] || SCRIPT_S905X3="${SCRIPT_S905X3_FILE}"
-[[ -n "${SCRIPT_S912}" ]] || SCRIPT_S912="${SCRIPT_S912_FILE}"
-[[ -n "${SCRIPT_S922X}" ]] || SCRIPT_S922X="${SCRIPT_S922X_FILE}"
-[[ -n "${SCRIPT_S922X_N2}" ]] || SCRIPT_S922X_N2="${SCRIPT_S922X_N2_FILE}"
-[[ -n "${SCRIPT_QEMU}" ]] || SCRIPT_QEMU="${SCRIPT_QEMU_FILE}"
-[[ -n "${SCRIPT_DIY}" ]] || SCRIPT_DIY="${SCRIPT_DIY_FILE}"
-
-# Specify make.env variable
-[[ -n "${WHOAMI}" ]] || WHOAMI="${WHOAMI_VALUE}"
-[[ -n "${OPENWRT_VER}" ]] || OPENWRT_VER="${OPENWRT_VER_VALUE}"
-[[ -n "${SW_FLOWOFFLOAD}" ]] || SW_FLOWOFFLOAD="${SW_FLOWOFFLOAD_VALUE}"
-[[ -n "${HW_FLOWOFFLOAD}" ]] || HW_FLOWOFFLOAD="${HW_FLOWOFFLOAD_VALUE}"
-[[ -n "${SFE_FLOW}" ]] || SFE_FLOW="${SFE_FLOW_VALUE}"
-[[ -n "${ENABLE_WIFI_K504}" ]] || ENABLE_WIFI_K504="${ENABLE_WIFI_K504_VALUE}"
-[[ -n "${ENABLE_WIFI_K510}" ]] || ENABLE_WIFI_K510="${ENABLE_WIFI_K510_VALUE}"
-[[ -n "${DISTRIB_REVISION}" ]] || DISTRIB_REVISION="${DISTRIB_REVISION_VALUE}"
-[[ -n "${DISTRIB_DESCRIPTION}" ]] || DISTRIB_DESCRIPTION="${DISTRIB_DESCRIPTION_VALUE}"
-
-echo -e "${INFO} Welcome to use the OpenWrt packaging tool! \n"
-
-cd /opt
-
-# Server space usage
-echo -e "${INFO} Server space usage before starting to compile:\n$(df -hT ${PWD}) \n"
-
-# clone ${SELECT_PACKITPATH} repo
-echo -e "${STEPS} Cloning package script repository [ ${SCRIPT_REPO_URL} ], branch [ ${SCRIPT_REPO_BRANCH} ] into ${SELECT_PACKITPATH}."
-git clone --depth 1 ${SCRIPT_REPO_URL} -b ${SCRIPT_REPO_BRANCH} ${SELECT_PACKITPATH}
-sync
-
-# Load *-armvirt-64-default-rootfs.tar.gz
-if [[ "${OPENWRT_ARMVIRT}" == http* ]]; then
-    echo -e "${STEPS} wget [ ${OPENWRT_ARMVIRT} ] file into ${SELECT_PACKITPATH}"
-    wget ${OPENWRT_ARMVIRT} -q -O "${SELECT_PACKITPATH}/${PACKAGE_FILE}"
-else
-    echo -e "${STEPS} copy [ ${GITHUB_WORKSPACE}/${OPENWRT_ARMVIRT} ] file into ${SELECT_PACKITPATH}"
-    cp -f ${GITHUB_WORKSPACE}/${OPENWRT_ARMVIRT} ${SELECT_PACKITPATH}/${PACKAGE_FILE}
-fi
-sync
-
-# Normal ${PACKAGE_FILE} file should not be less than 10MB
-armvirt_rootfs_size="$(ls -l ${SELECT_PACKITPATH}/${PACKAGE_FILE} 2>/dev/null | awk '{print $5}')"
-echo -e "${INFO} armvirt_rootfs_size: [ ${armvirt_rootfs_size} ]"
-if [[ "${armvirt_rootfs_size}" -ge "10000000" ]]; then
-    echo -e "${INFO} ${SELECT_PACKITPATH}/${PACKAGE_FILE} loaded successfully."
-else
-    echo -e "${ERROR} ${SELECT_PACKITPATH}/${PACKAGE_FILE} failed to load."
+error_msg() {
+    echo -e "${ERROR} ${1}"
     exit 1
-fi
+}
 
-# Load all selected kernels
-if [[ -n "${KERNEL_VERSION_NAME}" ]]; then
-    unset SELECT_ARMBIANKERNEL
-    oldIFS=$IFS
-    IFS=_
-    SELECT_ARMBIANKERNEL=(${KERNEL_VERSION_NAME})
-    IFS=$oldIFS
-fi
+init_var() {
+    echo -e "${STEPS} Start Initializing Variables..."
 
-# KERNEL_REPO_URL URL format conversion to support svn co
-if [[ "${KERNEL_REPO_URL}" == http* && -n "$(echo ${KERNEL_REPO_URL} | grep "tree")" ]]; then
-    # Left part
-    KERNEL_REPO_URL_LEFT="${KERNEL_REPO_URL%\/tree*}"
-    # Right part
-    KERNEL_REPO_URL_RIGHT="${KERNEL_REPO_URL#*tree\/}"
-    KERNEL_REPO_URL_RIGHT="${KERNEL_REPO_URL_RIGHT#*\/}"
-    KERNEL_REPO_URL="${KERNEL_REPO_URL_LEFT}/trunk/${KERNEL_REPO_URL_RIGHT}"
-fi
+    # Install the compressed package
+    sudo apt-get -qq update
+    sudo apt-get -qq install -y curl git coreutils p7zip p7zip-full zip unzip gzip xz-utils pigz zstd jq tar
 
-# Check the version on the kernel library
-if [[ -n "${KERNEL_AUTO_LATEST}" && "${KERNEL_AUTO_LATEST}" == "true" ]]; then
+    # Specify the default value
+    [[ -n "${SCRIPT_REPO_URL}" ]] || SCRIPT_REPO_URL="${SCRIPT_REPO_URL_VALUE}"
+    [[ "${SCRIPT_REPO_URL}" == http* ]] || SCRIPT_REPO_URL="https://github.com/${SCRIPT_REPO_URL}"
+    [[ -n "${SCRIPT_REPO_BRANCH}" ]] || SCRIPT_REPO_BRANCH="${SCRIPT_REPO_BRANCH_VALUE}"
+    [[ -n "${KERNEL_REPO_URL}" ]] || KERNEL_REPO_URL="${KERNEL_REPO_URL_VALUE}"
+    [[ -n "${PACKAGE_SOC}" ]] || PACKAGE_SOC="${PACKAGE_SOC_VALUE}"
+    [[ -n "${KERNEL_AUTO_LATEST}" ]] || KERNEL_AUTO_LATEST="${KERNEL_AUTO_LATEST_VALUE}"
+    [[ -n "${GZIP_IMGS}" ]] || GZIP_IMGS="${GZIP_IMGS_VALUE}"
+    [[ -n "${SELECT_PACKITPATH}" ]] || SELECT_PACKITPATH="${SELECT_PACKITPATH_VALUE}"
+    [[ -n "${SELECT_OUTPUTPATH}" ]] || SELECT_OUTPUTPATH="${SELECT_OUTPUTPATH_VALUE}"
+    [[ -n "${SAVE_OPENWRT_ARMVIRT}" ]] || SAVE_OPENWRT_ARMVIRT="${SAVE_OPENWRT_ARMVIRT_VALUE}"
 
-    TMP_ARR_KERNELS=()
-    SERVER_KERNEL_URL="${KERNEL_REPO_URL#*com\/}"
-    SERVER_KERNEL_URL="${SERVER_KERNEL_URL//trunk/contents}"
-    SERVER_KERNEL_URL="https://api.github.com/repos/${SERVER_KERNEL_URL}"
+    # Specify the default packaging script
+    [[ -n "${SCRIPT_VPLUS}" ]] || SCRIPT_VPLUS="${SCRIPT_VPLUS_FILE}"
+    [[ -n "${SCRIPT_BEIKEYUN}" ]] || SCRIPT_BEIKEYUN="${SCRIPT_BEIKEYUN_FILE}"
+    [[ -n "${SCRIPT_L1PRO}" ]] || SCRIPT_L1PRO="${SCRIPT_L1PRO_FILE}"
+    [[ -n "${SCRIPT_ZCUBE1MAX}" ]] || SCRIPT_ZCUBE1MAX="${SCRIPT_ZCUBE1MAX_FILE}"
+    [[ -n "${SCRIPT_CM3}" ]] || SCRIPT_CM3="${SCRIPT_CM3_FILE}"
+    [[ -n "${SCRIPT_HT2}" ]] || SCRIPT_HT2="${SCRIPT_HT2_FILE}"
+    [[ -n "${SCRIPT_E20C}" ]] || SCRIPT_E20C="${SCRIPT_E20C_FILE}"
+    [[ -n "${SCRIPT_H28K}" ]] || SCRIPT_H28K="${SCRIPT_H28K_FILE}"
+    [[ -n "${SCRIPT_H66K}" ]] || SCRIPT_H66K="${SCRIPT_H66K_FILE}"
+    [[ -n "${SCRIPT_H68K}" ]] || SCRIPT_H68K="${SCRIPT_H68K_FILE}"
+    [[ -n "${SCRIPT_H69K}" ]] || SCRIPT_H69K="${SCRIPT_H69K_FILE}"
+    [[ -n "${SCRIPT_H88K}" ]] || SCRIPT_H88K="${SCRIPT_H88K_FILE}"
+    [[ -n "${SCRIPT_H88KV3}" ]] || SCRIPT_H88KV3="${SCRIPT_H88KV3_FILE}"
+    [[ -n "${SCRIPT_JPTVBOX}" ]] || SCRIPT_JPTVBOX="${SCRIPT_JPTVBOX_FILE}"
+    [[ -n "${SCRIPT_R66S}" ]] || SCRIPT_R66S="${SCRIPT_R66S_FILE}"
+    [[ -n "${SCRIPT_R68S}" ]] || SCRIPT_R68S="${SCRIPT_R68S_FILE}"
+    [[ -n "${SCRIPT_E25}" ]] || SCRIPT_E25="${SCRIPT_E25_FILE}"
+    [[ -n "${SCRIPT_PHOTONICAT}" ]] || SCRIPT_PHOTONICAT="${SCRIPT_PHOTONICAT_FILE}"
+    [[ -n "${SCRIPT_WATERMELONPI}" ]] || SCRIPT_WATERMELONPI="${SCRIPT_WATERMELONPI_FILE}"
+    [[ -n "${SCRIPT_ROCK5B}" ]] || SCRIPT_ROCK5B="${SCRIPT_ROCK5B_FILE}"
+    [[ -n "${SCRIPT_ROCK5C}" ]] || SCRIPT_ROCK5C="${SCRIPT_ROCK5C_FILE}"
+    [[ -n "${SCRIPT_E52C}" ]] || SCRIPT_E52C="${SCRIPT_E52C_FILE}"
+    [[ -n "${SCRIPT_S905}" ]] || SCRIPT_S905="${SCRIPT_S905_FILE}"
+    [[ -n "${SCRIPT_S905D}" ]] || SCRIPT_S905D="${SCRIPT_S905D_FILE}"
+    [[ -n "${SCRIPT_S905X2}" ]] || SCRIPT_S905X2="${SCRIPT_S905X2_FILE}"
+    [[ -n "${SCRIPT_S905X3}" ]] || SCRIPT_S905X3="${SCRIPT_S905X3_FILE}"
+    [[ -n "${SCRIPT_S912}" ]] || SCRIPT_S912="${SCRIPT_S912_FILE}"
+    [[ -n "${SCRIPT_S922X}" ]] || SCRIPT_S922X="${SCRIPT_S922X_FILE}"
+    [[ -n "${SCRIPT_S922X_N2}" ]] || SCRIPT_S922X_N2="${SCRIPT_S922X_N2_FILE}"
+    [[ -n "${SCRIPT_QEMU}" ]] || SCRIPT_QEMU="${SCRIPT_QEMU_FILE}"
+    [[ -n "${SCRIPT_RK3399}" ]] || SCRIPT_RK3399="${SCRIPT_RK3399_FILE}"
+    [[ -n "${SCRIPT_DIY}" ]] || SCRIPT_DIY="${SCRIPT_DIY_FILE}"
 
-    i=1
-    for KERNEL_VAR in ${SELECT_ARMBIANKERNEL[*]}; do
-        echo -e "${INFO} (${i}) Auto query the latest kernel version of the same series for [ ${KERNEL_VAR} ]"
-        MAIN_LINE="$(echo ${KERNEL_VAR} | awk -F '.' '{print $1"."$2}')"
-        # Check the version on the server (e.g LATEST_VERSION="125")
-        LATEST_VERSION="$(curl -s "${SERVER_KERNEL_URL}" | grep "name" | grep -oE "${MAIN_LINE}.[0-9]+" | sed -e "s/${MAIN_LINE}.//g" | sort -n | sed -n '$p')"
-        if [[ "$?" -eq "0" && -n "${LATEST_VERSION}" ]]; then
-            TMP_ARR_KERNELS[${i}]="${MAIN_LINE}.${LATEST_VERSION}"
+    # Specify make.env variable
+    [[ -n "${WHOAMI}" ]] || WHOAMI="${WHOAMI_VALUE}"
+    [[ -n "${OPENWRT_VER}" ]] || OPENWRT_VER="${OPENWRT_VER_VALUE}"
+    [[ -n "${SW_FLOWOFFLOAD}" ]] || SW_FLOWOFFLOAD="${SW_FLOWOFFLOAD_VALUE}"
+    [[ -n "${HW_FLOWOFFLOAD}" ]] || HW_FLOWOFFLOAD="${HW_FLOWOFFLOAD_VALUE}"
+    [[ -n "${SFE_FLOW}" ]] || SFE_FLOW="${SFE_FLOW_VALUE}"
+    [[ -n "${ENABLE_WIFI_K504}" ]] || ENABLE_WIFI_K504="${ENABLE_WIFI_K504_VALUE}"
+    [[ -n "${ENABLE_WIFI_K510}" ]] || ENABLE_WIFI_K510="${ENABLE_WIFI_K510_VALUE}"
+    [[ -n "${DISTRIB_REVISION}" ]] || DISTRIB_REVISION="${DISTRIB_REVISION_VALUE}"
+    [[ -n "${DISTRIB_DESCRIPTION}" ]] || DISTRIB_DESCRIPTION="${DISTRIB_DESCRIPTION_VALUE}"
+
+    # Confirm package object
+    [[ "${PACKAGE_SOC}" != "all" ]] && {
+        oldIFS="${IFS}"
+        IFS="_"
+        PACKAGE_OPENWRT=(${PACKAGE_SOC})
+        IFS="${oldIFS}"
+    }
+
+    # Confirm customize rk3399 devices: ${CUSTOMIZE_RK3399}
+    # Format:  [ board1:dtb1/board2:dtb2/board3:dtb3/... ]
+    # Example: [ tvi3315a:rk3399-tvi3315a.dtb/sw799:rk3399-bozz-sw799.dtb ]
+    RK3399_BOARD_LIST=()
+    RK3399_DTB_LIST=()
+    [[ -n "${CUSTOMIZE_RK3399}" ]] && {
+        # Add rk3399 to the package list
+        PACKAGE_OPENWRT+=("rk3399")
+
+        # Split the string
+        oldIFS="${IFS}"
+        IFS="/"
+        for rk in ${CUSTOMIZE_RK3399}; do
+            IFS=":"
+            tmp_rk_arr=(${rk})
+            RK3399_BOARD_LIST+=(${tmp_rk_arr[0]})
+            RK3399_DTB_LIST+=(${tmp_rk_arr[1]})
+        done
+        IFS="${oldIFS}"
+    }
+
+    # Remove duplicate package drivers
+    PACKAGE_OPENWRT=($(echo "${PACKAGE_OPENWRT[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+
+    # Reset required kernel tags
+    KERNEL_TAGS_TMP=()
+    for kt in "${PACKAGE_OPENWRT[@]}"; do
+        if [[ " ${PACKAGE_OPENWRT_RK3588[@]} " =~ " ${kt} " ]]; then
+            KERNEL_TAGS_TMP+=("rk3588")
+        elif [[ " ${PACKAGE_OPENWRT_RK35XX[@]} " =~ " ${kt} " ]]; then
+            KERNEL_TAGS_TMP+=("rk35xx")
         else
-            TMP_ARR_KERNELS[${i}]="${KERNEL_VAR}"
+            KERNEL_TAGS_TMP+=("stable")
         fi
-        echo -e "${INFO} (${i}) [ ${TMP_ARR_KERNELS[$i]} ] is latest kernel."
-
-        let i++
     done
-    unset SELECT_ARMBIANKERNEL
-    SELECT_ARMBIANKERNEL="${TMP_ARR_KERNELS[*]}"
+    # Remove duplicate kernel tags
+    KERNEL_TAGS=($(echo "${KERNEL_TAGS_TMP[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
 
-fi
+    echo -e "${INFO} Package directory: [ /opt/${SELECT_PACKITPATH} ]"
+    echo -e "${INFO} Package SoC: [ $(echo ${PACKAGE_OPENWRT[@]} | xargs) ]"
+    echo -e "${INFO} Kernel tags: [ $(echo ${KERNEL_TAGS[@]} | xargs) ]"
 
-echo -e "${INFO} Package OpenWrt Kernel List: [ ${SELECT_ARMBIANKERNEL[*]} ]"
+    # Reset STABLE_KERNEL options
+    [[ -n "${KERNEL_VERSION_NAME}" && " ${KERNEL_TAGS[@]} " =~ " stable " ]] && {
+        oldIFS="${IFS}"
+        IFS="_"
+        STABLE_KERNEL=(${KERNEL_VERSION_NAME})
+        IFS="${oldIFS}"
+        echo -e "${INFO} Stable kernel: [ $(echo ${STABLE_KERNEL[@]} | xargs) ]"
+    }
 
-kernel_path="kernel"
-[[ -d "${kernel_path}" ]] || sudo mkdir -p ${kernel_path}
+    # Convert kernel library address to api format
+    echo -e "${INFO} Kernel download repository: [ ${KERNEL_REPO_URL} ]"
+    [[ "${KERNEL_REPO_URL}" =~ ^https: ]] && KERNEL_REPO_URL="$(echo ${KERNEL_REPO_URL} | awk -F'/' '{print $4"/"$5}')"
+    kernel_api="https://github.com/${KERNEL_REPO_URL}"
+    echo -e "${INFO} Kernel Query API: [ ${kernel_api} ]"
+}
 
-i="1"
-for KERNEL_VAR in ${SELECT_ARMBIANKERNEL[*]}; do
-    if [[ "$(ls ${kernel_path}/*${KERNEL_VAR}*.tar.gz -l 2>/dev/null | grep "^-" | wc -l)" -lt "3" ]]; then
-        echo -e "${INFO} (${i}) [ ${KERNEL_VAR} ] Kernel loading from [ ${KERNEL_REPO_URL/trunk/tree\/main}/${KERNEL_VAR} ]"
-        svn export ${KERNEL_REPO_URL}/${KERNEL_VAR} ${kernel_path} --force
+init_packit_repo() {
+    cd /opt
+
+    # Clone the repository into the packaging directory. If it fails, wait 1 minute and try again, try 10 times.
+    [[ -d "${SELECT_PACKITPATH}" ]] || {
+        echo -e "${STEPS} Start cloning repository [ ${SCRIPT_REPO_URL} ], branch [ ${SCRIPT_REPO_BRANCH} ] into [ ${SELECT_PACKITPATH} ]"
+        for i in {1..10}; do
+            git clone -q --single-branch --depth=1 --branch=${SCRIPT_REPO_BRANCH} ${SCRIPT_REPO_URL} ${SELECT_PACKITPATH}
+            [[ "${?}" -eq "0" ]] && break || sleep 60
+        done
+        [[ -d "${SELECT_PACKITPATH}" ]] || error_msg "Failed to clone the repository."
+    }
+
+    # Check the *rootfs.tar.gz package
+    [[ -z "${OPENWRT_ARMVIRT}" ]] && error_msg "The [ OPENWRT_ARMVIRT ] variable must be specified."
+
+    # Load *-armvirt-64-default-rootfs.tar.gz
+    rm -f ${SELECT_PACKITPATH}/${PACKAGE_FILE}
+    if [[ "${OPENWRT_ARMVIRT}" == http* ]]; then
+        echo -e "${STEPS} Download the [ ${OPENWRT_ARMVIRT} ] file into [ ${SELECT_PACKITPATH} ]"
+
+        # Download the *-armvirt-64-default-rootfs.tar.gz file. If the download fails, try again 10 times.
+        for i in {1..10}; do
+            curl -fsSL "${OPENWRT_ARMVIRT}" -o "${SELECT_PACKITPATH}/${PACKAGE_FILE}"
+            [[ "${?}" -eq "0" ]] && break || sleep 60
+        done
+        [[ "${?}" -eq "0" ]] || error_msg "Openwrt rootfs file download failed."
     else
-        echo -e "${INFO} (${i}) [ ${KERNEL_VAR} ] Kernel is in the local directory."
+        echo -e "${STEPS} copy [ ${GITHUB_WORKSPACE}/${OPENWRT_ARMVIRT} ] file into [ ${SELECT_PACKITPATH} ]"
+        cp -f ${GITHUB_WORKSPACE}/${OPENWRT_ARMVIRT} ${SELECT_PACKITPATH}/${PACKAGE_FILE}
+        [[ "${?}" -eq "0" ]] || error_msg "Openwrt rootfs file copy failed."
     fi
 
-    let i++
-done
-sync
+    # Normal ${PACKAGE_FILE} file should not be less than 10MB
+    armvirt_rootfs_size="$(ls -l ${SELECT_PACKITPATH}/${PACKAGE_FILE} 2>/dev/null | awk '{print $5}')"
+    echo -e "${INFO} armvirt_rootfs_size: [ ${armvirt_rootfs_size} ]"
+    if [[ "${armvirt_rootfs_size}" -ge "10000000" ]]; then
+        echo -e "${INFO} [ ${SELECT_PACKITPATH}/${PACKAGE_FILE} ] loaded successfully."
+    else
+        error_msg "The [ ${SELECT_PACKITPATH}/${PACKAGE_FILE} ] failed to load."
+    fi
 
-# Confirm package object
-if [[ -n "${PACKAGE_SOC}" && "${PACKAGE_SOC}" != "all" ]]; then
-    unset PACKAGE_OPENWRT
-    oldIFS=$IFS
-    IFS=_
-    PACKAGE_OPENWRT=(${PACKAGE_SOC})
-    IFS=$oldIFS
-fi
-echo -e "${INFO} Package OpenWrt SoC List: [ ${PACKAGE_OPENWRT[*]} ]"
+    # Add custom script
+    [[ -n "${SCRIPT_DIY_PATH}" ]] && {
+        rm -f ${SELECT_PACKITPATH}/${SCRIPT_DIY}
+        if [[ "${SCRIPT_DIY_PATH}" == http* ]]; then
+            echo -e "${INFO} Download the custom script file: [ ${SCRIPT_DIY_PATH} ]"
 
-# Packaged OpenWrt
-echo -e "${STEPS} Start packaging openwrt..."
-k="1"
-for KERNEL_VAR in ${SELECT_ARMBIANKERNEL[*]}; do
+            # Download the custom script file. If the download fails, try again 10 times.
+            for i in {1..10}; do
+                curl -fsSL "${SCRIPT_DIY_PATH}" -o "${SELECT_PACKITPATH}/${SCRIPT_DIY}"
+                [[ "${?}" -eq "0" ]] && break || sleep 60
+            done
+            [[ "${?}" -eq "0" ]] || error_msg "Custom script file download failed."
+        else
+            echo -e "${INFO} Copy custom script file: [ ${SCRIPT_DIY_PATH} ]"
+            cp -f ${GITHUB_WORKSPACE}/${SCRIPT_DIY_PATH} ${SELECT_PACKITPATH}/${SCRIPT_DIY}
+            [[ "${?}" -eq "0" ]] || error_msg "Custom script file copy failed."
+        fi
+        chmod +x ${SELECT_PACKITPATH}/${SCRIPT_DIY}
+        echo -e "List of [ ${SELECT_PACKITPATH} ] directory files:\n $(ls -l ${SELECT_PACKITPATH})"
+    }
+}
+
+query_kernel() {
+    echo -e "${STEPS} Start querying the latest kernel..."
+
+    # Check the version on the kernel library
+    x="1"
+    for vb in "${KERNEL_TAGS[@]}"; do
+        {
+            # Select the corresponding kernel directory and list
+            if [[ "${vb}" == "rk3588" ]]; then
+                down_kernel_list=(${RK3588_KERNEL[@]})
+            elif [[ "${vb}" == "rk35xx" ]]; then
+                down_kernel_list=(${RK35XX_KERNEL[@]})
+            else
+                down_kernel_list=(${STABLE_KERNEL[@]})
+            fi
+
+            # Query the name of the latest kernel version
+            TMP_ARR_KERNELS=()
+            i=1
+            for kernel_var in "${down_kernel_list[@]}"; do
+                echo -e "${INFO} (${i}) Auto query the latest kernel version of the same series for [ ${vb} - ${kernel_var} ]"
+
+                # Identify the kernel <VERSION> and <PATCHLEVEL>, such as [ 6.1 ]
+                kernel_verpatch="$(echo ${kernel_var} | awk -F '.' '{print $1"."$2}')"
+
+                # Query the latest kernel version
+                latest_version="$(
+                    curl -fsSL \
+                        ${kernel_api}/releases/expanded_assets/kernel_${vb} |
+                        grep -oE "${kernel_verpatch}.[0-9]+.*.tar.gz" | sed 's/.tar.gz//' |
+                        sort -urV | head -n 1
+                )"
+
+                if [[ "$?" -eq "0" && -n "${latest_version}" ]]; then
+                    TMP_ARR_KERNELS[${i}]="${latest_version}"
+                else
+                    TMP_ARR_KERNELS[${i}]="${kernel_var}"
+                fi
+
+                echo -e "${INFO} (${i}) [ ${vb} - ${TMP_ARR_KERNELS[$i]} ] is latest kernel."
+
+                let i++
+            done
+
+            # Reset the kernel array to the latest kernel version
+            if [[ "${vb}" == "rk3588" ]]; then
+                RK3588_KERNEL=(${TMP_ARR_KERNELS[@]})
+                echo -e "${INFO} The latest version of the rk3588 kernel: [ ${RK3588_KERNEL[@]} ]"
+            elif [[ "${vb}" == "rk35xx" ]]; then
+                RK35XX_KERNEL=(${TMP_ARR_KERNELS[@]})
+                echo -e "${INFO} The latest version of the rk35xx kernel: [ ${RK35XX_KERNEL[@]} ]"
+            else
+                STABLE_KERNEL=(${TMP_ARR_KERNELS[@]})
+                echo -e "${INFO} The latest version of the stable kernel: [ ${STABLE_KERNEL[@]} ]"
+            fi
+
+            let x++
+        }
+    done
+}
+
+check_kernel() {
+    [[ -n "${1}" ]] && check_path="${1}" || error_msg "Invalid kernel path to check."
+    check_files=($(cat "${check_path}/sha256sums" | awk '{print $2}'))
+    m="1"
+    for cf in "${check_files[@]}"; do
+        {
+            # Check if file exists
+            [[ -s "${check_path}/${cf}" ]] || error_msg "The [ ${cf} ] file is missing."
+            # Check if the file sha256sum is correct
+            tmp_sha256sum="$(sha256sum "${check_path}/${cf}" | awk '{print $1}')"
+            tmp_checkcode="$(cat ${check_path}/sha256sums | grep ${cf} | awk '{print $1}')"
+            [[ "${tmp_sha256sum}" == "${tmp_checkcode}" ]] || error_msg "[ ${cf} ]: sha256sum verification failed."
+            let m++
+        }
+    done
+    echo -e "${INFO} All [ ${#check_files[@]} ] kernel files are sha256sum checked to be complete.\n"
+}
+
+download_kernel() {
+    echo -e "${STEPS} Start downloading the kernel..."
 
     cd /opt
 
-    # If flowoffload is turned on, then sfe is forced to be closed by default
-    if [[ "${SW_FLOWOFFLOAD}" -eq "1" ]]; then
-        SFE_FLOW=0
-    fi
+    x="1"
+    for vb in "${KERNEL_TAGS[@]}"; do
+        {
+            # Set the kernel download list
+            if [[ "${vb}" == "rk3588" ]]; then
+                down_kernel_list=(${RK3588_KERNEL[@]})
+            elif [[ "${vb}" == "rk35xx" ]]; then
+                down_kernel_list=(${RK35XX_KERNEL[@]})
+            else
+                down_kernel_list=(${STABLE_KERNEL[@]})
+            fi
 
-    boot_kernel_file="$(ls kernel/boot-${KERNEL_VAR}* 2>/dev/null | head -n 1)"
-    boot_kernel_file="${boot_kernel_file##*/}"
-    boot_kernel_file="${boot_kernel_file//boot-/}"
-    boot_kernel_file="${boot_kernel_file//.tar.gz/}"
-    echo -e "${INFO} (${k}) KERNEL_VERSION: ${boot_kernel_file}"
+            # Kernel storage directory
+            kernel_path="kernel/${vb}"
+            [[ -d "${kernel_path}" ]] || mkdir -p ${kernel_path}
 
-    cd ${SELECT_PACKITPATH}
+            # Download the kernel to the storage directory
+            i="1"
+            for kernel_var in "${down_kernel_list[@]}"; do
+                if [[ ! -d "${kernel_path}/${kernel_var}" ]]; then
+                    kernel_down_from="https://github.com/${KERNEL_REPO_URL}/releases/download/kernel_${vb}/${kernel_var}.tar.gz"
+                    echo -e "${INFO} (${x}.${i}) [ ${vb} - ${kernel_var} ] Kernel download from [ ${kernel_down_from} ]"
 
-    if [[ -n "${OPENWRT_VER}" && "${OPENWRT_VER}" == "auto" ]]; then
-        OPENWRT_VER="$(cat make.env | grep "OPENWRT_VER=\"" | cut -d '"' -f2)"
-        echo -e "${INFO} (${k}) OPENWRT_VER: ${OPENWRT_VER}"
-    fi
+                    # Download the kernel file. If the download fails, try again 10 times.
+                    for t in {1..10}; do
+                        curl -fsSL "${kernel_down_from}" -o "${kernel_path}/${kernel_var}.tar.gz"
+                        [[ "${?}" -eq "0" ]] && break || sleep 60
+                    done
+                    [[ "${?}" -eq "0" ]] || error_msg "Failed to download the kernel files from the server."
 
-    rm -f make.env 2>/dev/null && sync
-    cat >make.env <<EOF
+                    # Decompress the kernel file
+                    tar -mxf "${kernel_path}/${kernel_var}.tar.gz" -C "${kernel_path}"
+                    [[ "${?}" -eq "0" ]] || error_msg "[ ${kernel_var} ] kernel decompression failed."
+                else
+                    echo -e "${INFO} (${x}.${i}) [ ${vb} - ${kernel_var} ] Kernel is in the local directory."
+                fi
+
+                # If the kernel contains the sha256sums file, check the files integrity
+                [[ -f "${kernel_path}/${kernel_var}/sha256sums" ]] && check_kernel "${kernel_path}/${kernel_var}"
+
+                let i++
+            done
+
+            # Delete downloaded kernel temporary files
+            rm -f ${kernel_path}/*.tar.gz
+            sync
+
+            let x++
+        }
+    done
+}
+
+make_openwrt() {
+    echo -e "${STEPS} Start packaging OpenWrt..."
+
+    i="1"
+    for PACKAGE_VAR in "${PACKAGE_OPENWRT[@]}"; do
+        {
+            # Distinguish between different OpenWrt and use different kernel
+            if [[ " ${PACKAGE_OPENWRT_RK3588[@]} " =~ " ${PACKAGE_VAR} " ]]; then
+                build_kernel=(${RK3588_KERNEL[@]})
+                vb="rk3588"
+            elif [[ " ${PACKAGE_OPENWRT_RK35XX[@]} " =~ " ${PACKAGE_VAR} " ]]; then
+                build_kernel=(${RK35XX_KERNEL[@]})
+                vb="rk35xx"
+            else
+                build_kernel=(${STABLE_KERNEL[@]})
+                vb="stable"
+            fi
+
+            k="1"
+            for kernel_var in "${build_kernel[@]}"; do
+                {
+                    # Rockchip rk3568 series only support 6.x.y and above kernel
+                    [[ -n "$(echo "${PACKAGE_OPENWRT_6XY[@]}" | grep -w "${PACKAGE_VAR}")" && "${kernel_var:0:2}" != "6." ]] && {
+                        echo -e "${STEPS} (${i}.${k}) ${NOTE} Based on <PACKAGE_OPENWRT_6XY>, skip the [ ${PACKAGE_VAR} - ${vb}/${kernel_var} ] build."
+                        let k++
+                        continue
+                    }
+
+                    # Check the available size of server space
+                    now_remaining_space="$(df -Tk /opt/${SELECT_PACKITPATH} | tail -n1 | awk '{print $5}' | echo $(($(xargs) / 1024 / 1024)))"
+                    [[ "${now_remaining_space}" -le "3" ]] && {
+                        echo -e "${WARNING} If the remaining space is less than 3G, exit this packaging. \n"
+                        break
+                    }
+
+                    cd /opt/kernel
+
+                    # Copy the kernel to the packaging directory
+                    rm -f *.tar.gz
+                    cp -f ${vb}/${kernel_var}/* .
+                    #
+                    boot_kernel_file="$(ls boot-${kernel_var}* 2>/dev/null | head -n 1)"
+                    KERNEL_VERSION="${boot_kernel_file:5:-7}"
+                    [[ "${vb}" == "rk3588" ]] && RK3588_KERNEL_VERSION="${KERNEL_VERSION}" || RK3588_KERNEL_VERSION=""
+                    [[ "${vb}" == "rk35xx" ]] && RK35XX_KERNEL_VERSION="${KERNEL_VERSION}" || RK35XX_KERNEL_VERSION=""
+                    echo -e "${STEPS} (${i}.${k}) Start packaging OpenWrt: [ ${PACKAGE_VAR} ], Kernel directory: [ ${vb} ], Kernel version: [ ${KERNEL_VERSION} ]"
+                    echo -e "${INFO} Remaining space is ${now_remaining_space}G. \n"
+
+                    cd /opt/${SELECT_PACKITPATH}
+
+                    # If flowoffload is turned on, then sfe is forced to be closed by default
+                    [[ "${SW_FLOWOFFLOAD}" -eq "1" ]] && SFE_FLOW="0"
+
+                    if [[ -n "${OPENWRT_VER}" && "${OPENWRT_VER}" == "auto" ]]; then
+                        OPENWRT_VER="$(cat make.env | grep "OPENWRT_VER=\"" | cut -d '"' -f2)"
+                        echo -e "${INFO} (${i}.${k}) OPENWRT_VER: [ ${OPENWRT_VER} ]"
+                    fi
+
+                    # Generate a custom make.env file
+                    rm -f make.env 2>/dev/null
+                    cat >make.env <<EOF
 WHOAMI="${WHOAMI}"
 OPENWRT_VER="${OPENWRT_VER}"
-KERNEL_VERSION="${boot_kernel_file}"
+RK3588_KERNEL_VERSION="${RK3588_KERNEL_VERSION}"
+RK35XX_KERNEL_VERSION="${RK35XX_KERNEL_VERSION}"
+KERNEL_VERSION="${KERNEL_VERSION}"
 KERNEL_PKG_HOME="/opt/kernel"
 SW_FLOWOFFLOAD="${SW_FLOWOFFLOAD}"
 HW_FLOWOFFLOAD="${HW_FLOWOFFLOAD}"
@@ -263,90 +527,126 @@ ENABLE_WIFI_K510="${ENABLE_WIFI_K510}"
 DISTRIB_REVISION="${DISTRIB_REVISION}"
 DISTRIB_DESCRIPTION="${DISTRIB_DESCRIPTION}"
 EOF
-    sync
 
-    echo -e "${INFO} make.env file info:"
-    cat make.env
+                    #echo -e "${INFO} make.env file info:"
+                    #cat make.env
 
-    i="1"
-    for PACKAGE_VAR in ${PACKAGE_OPENWRT[*]}; do
-        {
-            cd /opt/${SELECT_PACKITPATH}
-            echo -e "${STEPS} (${k}.${i}) Start packaging OpenWrt, Kernel is [ ${KERNEL_VAR} ], SoC is [ ${PACKAGE_VAR} ]"
+                    # Select the corresponding packaging script
+                    case "${PACKAGE_VAR}" in
+                        vplus)            [[ -f "${SCRIPT_VPLUS}" ]]           && sudo ./${SCRIPT_VPLUS} ;;
+                        beikeyun)         [[ -f "${SCRIPT_BEIKEYUN}" ]]        && sudo ./${SCRIPT_BEIKEYUN} ;;
+                        l1pro)            [[ -f "${SCRIPT_L1PRO}" ]]           && sudo ./${SCRIPT_L1PRO} ;;
+                        zcube1-max)       [[ -f "${SCRIPT_ZCUBE1MAX}" ]]       && sudo ./${SCRIPT_ZCUBE1MAX} ;;
+                        cm3)              [[ -f "${SCRIPT_CM3}" ]]             && sudo ./${SCRIPT_CM3} ;;
+                        ak88)             [[ -f "${SCRIPT_H88K}" ]]            && sudo ./${SCRIPT_H88K} ;;
+                        ht2)              [[ -f "${SCRIPT_HT2}" ]]             && sudo ./${SCRIPT_HT2} ;;
+                        e20c)             [[ -f "${SCRIPT_E20C}" ]]            && sudo ./${SCRIPT_E20C} ;;
+                        h28k)             [[ -f "${SCRIPT_H28K}" ]]            && sudo ./${SCRIPT_H28K} ;;
+                        h88k)             [[ -f "${SCRIPT_H88K}" ]]            && sudo ./${SCRIPT_H88K} "25" ;;
+                        h88k-v3)          [[ -f "${SCRIPT_H88KV3}" ]]          && sudo ./${SCRIPT_H88KV3} ;;
+                        h66k)             [[ -f "${SCRIPT_H66K}" ]]            && sudo ./${SCRIPT_H66K} ;;
+                        h68k)             [[ -f "${SCRIPT_H68K}" ]]            && sudo ./${SCRIPT_H68K} ;;
+                        h69k)             [[ -f "${SCRIPT_H69K}" ]]            && sudo ./${SCRIPT_H69K} ;;
+                        h69k-max)         [[ -f "${SCRIPT_H69K}" ]]            && sudo ./${SCRIPT_H69K} "max" ;;
+                        jp-tvbox)         [[ -f "${SCRIPT_JPTVBOX}" ]]         && sudo ./${SCRIPT_JPTVBOX} ;;
+                        r66s)             [[ -f "${SCRIPT_R66S}" ]]            && sudo ./${SCRIPT_R66S} ;;
+                        r68s)             [[ -f "${SCRIPT_R68S}" ]]            && sudo ./${SCRIPT_R68S} ;;
+                        rock5b)           [[ -f "${SCRIPT_ROCK5B}" ]]          && sudo ./${SCRIPT_ROCK5B} ;;
+                        rock5c)           [[ -f "${SCRIPT_ROCK5C}" ]]          && sudo ./${SCRIPT_ROCK5C} ;;
+                        e52c)             [[ -f "${SCRIPT_E52C}" ]]            && sudo ./${SCRIPT_E52C} ;;
+                        e25)              [[ -f "${SCRIPT_E25}" ]]             && sudo ./${SCRIPT_E25} ;;
+                        photonicat)       [[ -f "${SCRIPT_PHOTONICAT}" ]]      && sudo ./${SCRIPT_PHOTONICAT} ;;
+                        watermelon-pi)    [[ -f "${SCRIPT_WATERMELONPI}" ]]    && sudo ./${SCRIPT_WATERMELONPI} ;;
+                        s905)             [[ -f "${SCRIPT_S905}" ]]            && sudo ./${SCRIPT_S905} ;;
+                        s905d)            [[ -f "${SCRIPT_S905D}" ]]           && sudo ./${SCRIPT_S905D} ;;
+                        s905x2)           [[ -f "${SCRIPT_S905X2}" ]]          && sudo ./${SCRIPT_S905X2} ;;
+                        s905x3)           [[ -f "${SCRIPT_S905X3}" ]]          && sudo ./${SCRIPT_S905X3} ;;
+                        s912)             [[ -f "${SCRIPT_S912}" ]]            && sudo ./${SCRIPT_S912} ;;
+                        s922x)            [[ -f "${SCRIPT_S922X}" ]]           && sudo ./${SCRIPT_S922X} ;;
+                        s922x-n2)         [[ -f "${SCRIPT_S922X_N2}" ]]        && sudo ./${SCRIPT_S922X_N2} ;;
+                        qemu)             [[ -f "${SCRIPT_QEMU}" ]]            && sudo ./${SCRIPT_QEMU} ;;
+                        diy)              [[ -f "${SCRIPT_DIY}" ]]             && sudo ./${SCRIPT_DIY} ;;
+                        rk3399)           [[ -f "${SCRIPT_RK3399}" && ${#RK3399_BOARD_LIST[@]} -gt 0 ]] && {
+                                          for rbl in ${!RK3399_BOARD_LIST[@]}; do
+                                              sudo ./${SCRIPT_RK3399} ${RK3399_BOARD_LIST[rbl]} ${RK3399_DTB_LIST[rbl]}
+                                          done
+                                          } ;;
+                        *)                echo -e "${WARNING} Have no this SoC. Skipped." && continue ;;
+                    esac
 
-            now_remaining_space="$(df -hT ${PWD} | grep '/dev/' | awk '{print $5}' | sed 's/.$//' | awk -F "." '{print $1}')"
-            if [[ "${now_remaining_space}" -le "2" ]]; then
-                echo -e "${WARNING} If the remaining space is less than 2G, exit this packaging. \n"
-                break 2
-            else
-                echo -e "${INFO} Remaining space is ${now_remaining_space}G. \n"
-            fi
+                    # Generate compressed file
+                    img_num="$(ls /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}/*.img 2>/dev/null | wc -l)"
+                    [[ "${img_num}" -ne "0" ]] && {
+                        echo -e "${STEPS} (${i}.${k}) Start making compressed files in the [ ${SELECT_OUTPUTPATH} ] directory."
+                        cd /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}
+                        case "${GZIP_IMGS}" in
+                            7z | .7z)      ls *.img | head -n 1 | xargs -I % sh -c 'sudo 7z a -t7z -r %.7z %; rm -f %' ;;
+                            zip | .zip)    ls *.img | head -n 1 | xargs -I % sh -c 'sudo zip %.zip %; rm -f %' ;;
+                            zst | .zst)    sudo zstd --rm *.img ;;
+                            xz | .xz)      sudo xz -z *.img ;;
+                            gz | .gz | *)  sudo pigz -f *.img ;;
+                        esac
+                    }
 
-            case "${PACKAGE_VAR}" in
-                vplus)       [[ -f "${SCRIPT_VPLUS}" ]] && sudo ./${SCRIPT_VPLUS} ;;
-                beikeyun)    [[ -f "${SCRIPT_BEIKEYUN}" ]] && sudo ./${SCRIPT_BEIKEYUN} ;;
-                l1pro)       [[ -f "${SCRIPT_L1PRO}" ]] && sudo ./${SCRIPT_L1PRO} ;;
-                r68s)        [[ -f "${SCRIPT_R68S}" ]] && sudo ./${SCRIPT_R68S} ;;
-                s905)        [[ -f "${SCRIPT_S905}" ]] && sudo ./${SCRIPT_S905} ;;
-                s905d)       [[ -f "${SCRIPT_S905D}" ]] && sudo ./${SCRIPT_S905D} ;;
-                s905x2)      [[ -f "${SCRIPT_S905X2}" ]] && sudo ./${SCRIPT_S905X2} ;;
-                s905x3)      [[ -f "${SCRIPT_S905X3}" ]] && sudo ./${SCRIPT_S905X3} ;;
-                s912)        [[ -f "${SCRIPT_S912}" ]] && sudo ./${SCRIPT_S912} ;;
-                s922x)       [[ -f "${SCRIPT_S922X}" ]] && sudo ./${SCRIPT_S922X} ;;
-                s922x-n2)    [[ -f "${SCRIPT_S922X_N2}" ]] && sudo ./${SCRIPT_S922X_N2} ;;
-                qemu)        [[ -f "${SCRIPT_QEMU}" ]] && sudo ./${SCRIPT_QEMU} ;;
-                diy)         [[ -f "${SCRIPT_DIY}" ]] && sudo ./${SCRIPT_DIY} ;;
-                *)           echo -e "${WARNING} Have no this SoC. Skipped."
-                             continue ;;
-            esac
-            echo -e "${SUCCESS} (${k}.${i}) Package openwrt completed."
-            sync
+                    echo -e "${SUCCESS} (${i}.${k}) OpenWrt packaging succeeded: [ ${PACKAGE_VAR} - ${vb} - ${kernel_var} ] \n"
+                    sync
 
-            echo -e "${STEPS} Compress the .img file in the [ ${SELECT_OUTPUTPATH} ] directory. \n"
-            cd /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}
-            case "${GZIP_IMGS}" in
-                7z | .7z)      ls *.img | head -n 1 | xargs -I % sh -c '7z a -t7z -r %.7z %; sync; rm -f %' ;;
-                zip | .zip)    ls *.img | head -n 1 | xargs -I % sh -c 'zip %.zip %; sync; rm -f %' ;;
-                zst | .zst)    zstd --rm *.img ;;
-                xz | .xz)      xz -z *.img ;;
-                gz | .gz | *)  pigz -9 *.img ;;
-            esac
-            sync
+                    let k++
+                }
+            done
 
             let i++
         }
     done
 
-    let k++
-done
-echo -e "${SUCCESS} All packaged completed. \n"
+    echo -e "${SUCCESS} All packaged completed. \n"
+}
 
-echo -e "${STEPS} Output environment variables."
-if [[ -d "/opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}" ]]; then
+out_github_env() {
+    echo -e "${STEPS} Output github.com environment variables..."
+    if [[ -d "/opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}" ]]; then
 
-    cd /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}
+        cd /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH}
 
-    if [[ "${SAVE_OPENWRT_ARMVIRT}" == "true" ]]; then
-        echo -e "${STEPS} copy ${PACKAGE_FILE} files into ${SELECT_OUTPUTPATH} folder."
-        cp -f ../${PACKAGE_FILE} . && sync
+        if [[ "${SAVE_OPENWRT_ARMVIRT}" == "true" ]]; then
+            echo -e "${INFO} copy [ ${PACKAGE_FILE} ] into [ ${SELECT_OUTPUTPATH} ]"
+            sudo cp -f ../${PACKAGE_FILE} .
+        fi
+
+        # Generate a sha256sum verification file for each OpenWrt file
+        for file in *; do [[ -f "${file}" ]] && sudo sha256sum "${file}" | sudo tee "${file}.sha" >/dev/null; done
+        sudo rm -f *.sha.sha 2>/dev/null
+
+        echo "PACKAGED_OUTPUTPATH=${PWD}" >>${GITHUB_ENV}
+        echo "PACKAGED_OUTPUTDATE=$(date +"%m.%d.%H%M")" >>${GITHUB_ENV}
+        echo "PACKAGED_STATUS=success" >>${GITHUB_ENV}
+        echo -e "PACKAGED_OUTPUTPATH: ${PWD}"
+        echo -e "PACKAGED_OUTPUTDATE: $(date +"%m.%d.%H%M")"
+        echo -e "PACKAGED_STATUS: success"
+        echo -e "${INFO} PACKAGED_OUTPUTPATH files list:"
+        echo -e "$(ls /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH} 2>/dev/null) \n"
+    else
+        echo -e "${ERROR} Packaging failed. \n"
+        echo "PACKAGED_STATUS=failure" >>${GITHUB_ENV}
     fi
+}
+# Show welcome message
+echo -e "${STEPS} Welcome to use the OpenWrt packaging tool! \n"
+echo -e "${INFO} Server CPU configuration information: \n$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
 
-    # Generate sha256sum check file
-    sha256sum * >sha256sums && sync
+# Start initializing variables
+init_var
+init_packit_repo
 
-    echo "PACKAGED_OUTPUTPATH=${PWD}" >>$GITHUB_ENV
-    echo "PACKAGED_OUTPUTDATE=$(date +"%m.%d.%H%M")" >>$GITHUB_ENV
-    echo "PACKAGED_STATUS=success" >>$GITHUB_ENV
-    echo -e "PACKAGED_OUTPUTPATH: ${PWD}"
-    echo -e "PACKAGED_OUTPUTDATE: $(date +"%m.%d.%H%M")"
-    echo -e "PACKAGED_STATUS: success"
-    echo -e "${INFO} PACKAGED_OUTPUTPATH files list:"
-    echo -e "$(ls /opt/${SELECT_PACKITPATH}/${SELECT_OUTPUTPATH} 2>/dev/null) \n"
-else
-    echo -e "${ERROR} Packaging failed. \n"
-    echo "PACKAGED_STATUS=failure" >>$GITHUB_ENV
-fi
+# Show server start information
+echo -e "${INFO} Server space usage before starting to compile:\n$(df -hT /opt/${SELECT_PACKITPATH}) \n"
 
-# Server space usage and packaged files
-echo -e "${INFO} Server space usage after compilation:\n$(df -hT ${PWD}) \n"
-echo -e "${STEPS} The packaging process has been completed. \n"
+# Packit OpenWrt
+[[ "${KERNEL_AUTO_LATEST}" == "true" ]] && query_kernel
+download_kernel
+make_openwrt
+out_github_env
+
+# Show server end information
+echo -e "${INFO} Server space usage after compilation:\n$(df -hT /opt/${SELECT_PACKITPATH}) \n"
+echo -e "${SUCCESS} The packaging process has been completed. \n"
